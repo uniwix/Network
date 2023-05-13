@@ -140,7 +140,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="framework.h" />
-    <ClInclude Include="Network.h" />
+    <ClInclude Include="Network.hpp" />
     <ClInclude Include="pch.h" />
   </ItemGroup>
   <ItemGroup>
