@@ -343,15 +343,16 @@ float NetNeurons::Network::train(const std::vector<float>& inputs, const std::ve
 	
 	for (size_t i = 0; i < m_layers_.size(); ++i)
 	{
-		activation_neurones[i+1] = mat_mul_tanh(m_layers_[i], activation_neurones[i]);  // sinon X_i = f[A_i] 1 avec A_i = somme(j; W_i,j * X_j)
+		activation_neurones[i+1] = mat_mul_tanh(m_layers_[i], activation_neurones[i]);  // sinon X_i = f[A_i] avec A_i = somme(j; W_i,j * X_j)
 	}
 	for (size_t i = 0; i < expected_outputs.size(); ++i)  // si s est une cellule de sortie: Y_s = 2 (Sh_s - Yh_s) * f'(As)
 	{
 		float tanh_A = tanh(produit_scalaire(activation_neurones[m_layers_.size()], m_layers_[m_layers_.size() - 1][i]));
 		erreur_neurones[m_layers_.size()].push_back(2 * (activation_neurones[m_layers_.size()][i] - expected_outputs[i]) * (1 - tanh_A * tanh_A));
 	}
-	for (size_t i = m_layers_.size() - 1; i >= 0; --i)
+	for (size_t ii = 0; ii < m_layers_.size(); ++ii)
 	{
+		int i = m_layers_.size() - ii - 1;
 		for (size_t j = 0; j < m_layers_[i].size(); ++j)  // sinon: Y_i = f'(A_i) * somme(j; W_j,i * Y_j)
 		{
 			float tanh_A = tanh(produit_scalaire(activation_neurones[i], m_layers_[i][j]));
@@ -506,4 +507,115 @@ int NetNeurons::Network::encode(const std::vector<bool>& rec)
 		recs += rec[i];
 	}
 	return recs;
+}
+
+
+std::vector<float> NetNeurons::Network::wire_fit(std::vector<float> xt)
+{
+	std::vector<float> sorties = compute(xt);
+	int n_wires = 10;
+	int n_sorties = sorties.size();
+	int n_controls = n_sorties / n_wires - 1;
+
+	float alpha = 0.1f;
+	float epsilon = 0.1f;
+	float gamma = 0.1f;
+	float c = 0.1f;
+
+	float qmax = 0;
+	int imax = 0;
+
+	for (int i = 0; i < n_sorties; i += n_controls + 1)
+	{
+		if (sorties[i] > qmax)
+		{
+			qmax = sorties[i];
+			imax = i;
+		}
+	}
+	// exectute({sorties.begin() + imax + 1, sorties.begin() + imax + n_controls + 1});
+
+	float R = 1.f;
+	std::vector<float> xt1(n_controls, 0.f); // from execute
+
+	std::vector<float> sorties1 = compute(xt1);
+	float Q1 = 0.f;
+	for (int i = 0; i < n_sorties; i += n_wires)
+	{
+		if (sorties1[i] > Q1)
+		{
+			Q1 = sorties1[i];
+		}
+	}
+
+	float delta_Q = alpha * (qmax + R + gamma * Q1);
+
+	std::vector<float> distances(n_wires, 0.f);
+	std::vector<float> qs(n_wires, 0.f);
+	for (int i = 0; i < n_sorties; i += n_controls + 1)
+	{
+		distances[i] = distance({ sorties.begin() + i + 1, sorties.begin() + i + n_controls + 1 }, { sorties.begin() + imax + 1, sorties.begin() + imax + n_controls + 1 }, sorties[i], qmax, c, epsilon);
+		qs[i] = sorties[i];
+	}
+
+	float wsum_ = wsum(distances, qs);
+	float norm_ = norm(distances);
+
+	for (size_t i = 0; i < sorties.size(); ++i)
+	{
+		if (i == imax)
+		{
+			sorties[i] += delta_Q;
+		}
+		else if (i % n_wires == 0)
+		{
+			sorties[i] += alpha * diffQ(i / n_wires, sorties[i], distances, wsum_, norm_, c);
+		}
+		else
+		{
+			sorties[i] += alpha * diffQ(i / n_wires, sorties[i], sorties[imax + i % n_wires + 1], sorties[i - i % n_wires - 1], distances, wsum_, norm_);
+		}
+	}
+
+	train(xt, sorties, alpha);
+}
+
+float distance(const std::vector<float>& u, const std::vector<float>& ui, float qi, float qmax, float c, float epsilon)
+{
+	float d = c * (qmax - qi) + epsilon;
+	for (size_t j = 0; j < u.size(); ++j)
+	{
+		d += (u[j] - ui[j]) * (u[j] - ui[j]);
+	}
+	return d;
+}
+
+float wsum(const std::vector<float>& distances, const std::vector<float>& q)
+{
+	float s = 0.f;
+	for (size_t i = 0; i < distances.size(); ++i)
+	{
+		s += q[i] / distances[i];
+	}
+	return s;
+}
+
+float norm(const std::vector<float>& distances)
+{
+	float s = 0.f;
+	for (size_t i = 0; i < distances.size(); ++i)
+	{
+		s += 1.f / distances[i];
+	}
+	return s;
+}
+
+float diffQ(int k, float qk, const std::vector<float>& distances, float wsum_, float norm_, float c)
+{
+	return (norm_ * (distances[k] + c * qk) - wsum_ * c) / (norm_ * norm_ * distances[k] * distances[k]);
+}
+
+float diffQ(int k, float ukj, float uj, float qk, const std::vector<float>& distances, float wsum_, float norm_)
+{
+	return  2.f * (wsum_ - norm_ * qk) * (ukj - uj) / (norm_ * norm_ * distances[k] * distances[k]);
 }

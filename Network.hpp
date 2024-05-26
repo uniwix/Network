@@ -116,6 +116,8 @@ namespace NetNeurons
 
 		NETWORK_API static int encode(const std::vector<bool>& rec);
 
+		NETWORK_API std::vector<float> wire_fit(std::vector<float> xt);
+
 	private:
 		/**
 		 * \brief Set the weights of a layer
