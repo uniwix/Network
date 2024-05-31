@@ -60,6 +60,9 @@ namespace NetNeurons
 		NETWORK_API Network(std::vector<std::vector<std::vector<float>>> data, const std::vector<bool>& rec);
 
 		NETWORK_API Network(std::istream& is, const std::vector<bool>& rec);
+
+		NETWORK_API Network(int n_inputs, int n_hidden, int n_wires, int n_outputs);
+
 		/**
 		 * \brief Compute the result of the network for the given inputs
 		 * \param input Vector containing the inputs values
@@ -106,6 +109,8 @@ namespace NetNeurons
 
 		NETWORK_API std::vector<int8_t> serialize() const;
 
+		NETWORK_API static std::vector<int8_t> serialize(const std::vector<std::vector<std::vector<float>>>& data);
+
 		NETWORK_API static std::vector<std::vector<std::vector<float>>> deserialize(std::istream& is);
 
 		NETWORK_API static std::vector<std::vector<std::vector<float>>> deserialize(const std::vector<int8_t>& serialized);
@@ -116,8 +121,12 @@ namespace NetNeurons
 
 		NETWORK_API static int encode(const std::vector<bool>& rec);
 
-		NETWORK_API std::vector<float> wire_fit(std::vector<float> xt);
+		NETWORK_API void wire_fit(const std::vector<float>& xt, const std::vector<float>& xt1, float R, const std::vector<std::vector<float>>& wires, const std::vector<float>& q_values, int imax, float alpha, float gamma, float epsilon, float c);
 
+		NETWORK_API int getWireCount() const { return m_n_wires_; };
+		NETWORK_API int getSortiesCount() const { return m_n_sorties_; };
+		NETWORK_API int getControlsCount() const { return m_n_controls_; };
+		
 	private:
 		/**
 		 * \brief Set the weights of a layer
@@ -141,6 +150,21 @@ namespace NetNeurons
 		std::vector<std::vector<std::vector<float>>> m_layers_;
 		std::vector<std::vector<float>> m_neurons_previous_state_;
 		std::vector<bool> m_rec_;
+
+		int m_n_wires_ = 10;
+		int m_n_sorties_ = 40;
+		int m_n_controls_ = 3;
 	};
 }
+
+
+float distance(const std::vector<float>& u, const std::vector<float>& ui, float qi, float qmax, float c, float epsilon);
+
+float wsum(const std::vector<float>& distances, const std::vector<float>& q);
+
+float norm(const std::vector<float>& distances);
+
+float diffQ(float qk, float dist, float wsum_, float norm_, float c);
+
+float diffQ(float ukj, float uj, float qk, float dist, float wsum_, float norm_);
 

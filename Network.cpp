@@ -25,6 +25,17 @@ float produit_scalaire(const std::vector<float>& a, const std::vector<float>& b)
 	return out;
 }
 
+float produit_scalaire_transpose(const std::vector<float>& a, const std::vector<std::vector<float>>& b, int i)
+{
+	assert(a.size() == b.size());
+	float out(0.f);
+	for (size_t j = 0; j < a.size(); ++j)
+	{
+		out += a[j] * b[j][i];
+	}
+	return out;
+}
+
 std::vector<float> mat_mul(const std::vector<std::vector<float>>& mat, const std::vector<float>& vec)
 {
 	std::vector<float> out(mat.size());
@@ -90,6 +101,14 @@ NetNeurons::Network::Network(std::istream& is, const std::vector<bool>& rec)
 			m_neurons_previous_state_[i] = std::vector<float>();
 		}
 	}
+}
+
+NetNeurons::Network::Network(int n_inputs, int n_hidden, int n_wires, int n_outputs)
+	: Network({ n_inputs, n_hidden, n_wires * (n_outputs + 1) })
+{
+	m_n_controls_ = n_outputs;
+	m_n_wires_ = n_wires;
+	m_n_sorties_ = n_wires * (n_outputs + 1);
 }
 
 NetNeurons::Network::Network(const std::vector<int>& layers)
@@ -315,7 +334,7 @@ std::vector<std::vector<std::vector<float>>> NetNeurons::Network::deserialize(st
 			std::vector<float> neuron;
 			while (std::getline(iss_neuron, weight, ' '))
 			{
-				neuron.push_back(std::stod(weight));
+				neuron.push_back(std::stof(weight));
 			}
 			layer.push_back(neuron);
 		}
@@ -327,11 +346,11 @@ std::vector<std::vector<std::vector<float>>> NetNeurons::Network::deserialize(st
 float NetNeurons::Network::train(const std::vector<float>& inputs, const std::vector<float>& expected_outputs, float epsilon)
 {
 	// Check if the inputs have a valid size for the layer
-	if (inputs.size() != m_layers_[0].size())
+	if (inputs.size() != m_layers_[0][0].size())
 	{
 		throw std::invalid_argument("The inputs has a invalid size for the layer");
 	}
-	if (expected_outputs.size() != m_layers_[m_layers_.size() - 1][0].size())
+	if (expected_outputs.size() != m_layers_[m_layers_.size() - 1].size())
 	{
 		throw std::invalid_argument("The expected outputs has a invalid size for the layer");
 	}
@@ -341,26 +360,23 @@ float NetNeurons::Network::train(const std::vector<float>& inputs, const std::ve
 
 	activation_neurones[0] = inputs;  // si i est une cellule d'entrée: Khi_i=X_i
 	
-	for (size_t i = 0; i < m_layers_.size(); ++i)
+	for (size_t n = 1; n <= m_layers_.size(); ++n)
 	{
-		activation_neurones[i+1] = mat_mul_tanh(m_layers_[i], activation_neurones[i]);  // sinon X_i = f[A_i] avec A_i = somme(j; W_i,j * X_j)
+		activation_neurones[n] = mat_mul_tanh(m_layers_[n - 1], activation_neurones[n-1]);  // sinon X_i = f[A_i] avec A_i = somme(j; W_i,j * X_j)
 	}
-	for (size_t i = 0; i < expected_outputs.size(); ++i)  // si s est une cellule de sortie: Y_s = 2 (Sh_s - Yh_s) * f'(As)
+	for (size_t i = 0; i < m_layers_[m_layers_.size() - 1].size(); ++i)  // si s est une cellule de sortie: Y_s = 2 (Sh_s - Yh_s) * f'(As)
 	{
-		float tanh_A = tanh(produit_scalaire(activation_neurones[m_layers_.size()], m_layers_[m_layers_.size() - 1][i]));
+		float tanh_A = tanh(produit_scalaire(activation_neurones[m_layers_.size()-1], m_layers_[m_layers_.size() - 1][i]));
 		erreur_neurones[m_layers_.size()].push_back(2 * (activation_neurones[m_layers_.size()][i] - expected_outputs[i]) * (1 - tanh_A * tanh_A));
 	}
-	for (size_t ii = 0; ii < m_layers_.size(); ++ii)
+	for (int n = m_layers_.size(); n > 1; --n)
 	{
-		int i = m_layers_.size() - ii - 1;
-		for (size_t j = 0; j < m_layers_[i].size(); ++j)  // sinon: Y_i = f'(A_i) * somme(j; W_j,i * Y_j)
+		std::vector<float> tanh_A_vector = mat_mul_tanh(m_layers_[n-1 - 1], activation_neurones[n-1-1]);
+		for (size_t j = 0; j < m_layers_[n - 1][0].size(); ++j)  // sinon: Y_i = f'(A_i) * somme(j; W_j,i * Y_j)
 		{
-			float tanh_A = tanh(produit_scalaire(activation_neurones[i], m_layers_[i][j]));
-			float B = 0.f;
-			for (size_t k = 0; k < m_layers_[i + 1].size(); ++k) {
-				B += erreur_neurones[i + 1][k] * m_layers_[i + 1][k][j];
-			}
-			erreur_neurones[i].push_back((1 - tanh_A * tanh_A) * B);
+			// float tanh_A = tanh(produit_scalaire(activation_neurones[i-1], m_layers_[i-1 - 1][j]));
+			float B = produit_scalaire_transpose(erreur_neurones[n], m_layers_[n - 1], j);
+			erreur_neurones[n - 1].push_back((1 - tanh_A_vector[j] * tanh_A_vector[j]) * B);
 		}
 	}
 
@@ -370,7 +386,7 @@ float NetNeurons::Network::train(const std::vector<float>& inputs, const std::ve
 		{
 			for (size_t j = 0; j < m_layers_[n][i].size(); ++j)
 			{
-				m_layers_[n][i][j] -= epsilon * activation_neurones[n][i] * erreur_neurones[n + 1][j];
+				m_layers_[n][i][j] -= epsilon * activation_neurones[n][j] * erreur_neurones[n + 1][i];
 			}
 		}
 	}
@@ -414,6 +430,8 @@ std::vector<float> NetNeurons::Network::compute(const std::vector<float>& inputs
 
 int8_t to_int8(float f)
 {
+	f = f > 1.f ? 1.f : f;
+	f = f < -1.f ? -1.f : f;
 	return static_cast<int8_t>(f * 126);
 }
 
@@ -427,14 +445,38 @@ int8_t to_int8(char f)
 		return 0b10000001;
 	case '*':
 		return 0b01111111;
-	default:
-		break;
+	default:  // should not happen
+		return 0;
 	};
 }
 
 float to_float(int8_t i)
 {
 	return static_cast<float>(i) / 126;
+}
+
+std::vector<int8_t> NetNeurons::Network::serialize(const std::vector<std::vector<std::vector<float>>>& data)
+{
+	std::vector<int8_t> serialized;
+	for (size_t i = 0; i < data.size(); ++i)
+	{
+		for (size_t j = 0; j < data[i].size(); ++j)
+		{
+			for (size_t k = 0; k < data[i][j].size(); ++k)
+			{
+				serialized.push_back(to_int8(data[i][j][k]));
+			}
+			if (j != data[i].size() - 1)
+			{
+				serialized.push_back(to_int8('/'));
+			}
+		}
+		if (i != data.size() - 1)
+		{
+			serialized.push_back(to_int8('*'));
+		}
+	}
+	return serialized;
 }
 
 std::vector<int8_t> NetNeurons::Network::serialize() const
@@ -509,38 +551,11 @@ int NetNeurons::Network::encode(const std::vector<bool>& rec)
 	return recs;
 }
 
-
-std::vector<float> NetNeurons::Network::wire_fit(std::vector<float> xt)
+void NetNeurons::Network::wire_fit(const std::vector<float>& xt, const std::vector<float>& xt1, float R, const std::vector<std::vector<float>>& wires, const std::vector<float>& q_values, int imax, float alpha, float gamma, float epsilon, float c)
 {
-	std::vector<float> sorties = compute(xt);
-	int n_wires = 10;
-	int n_sorties = sorties.size();
-	int n_controls = n_sorties / n_wires - 1;
-
-	float alpha = 0.1f;
-	float epsilon = 0.1f;
-	float gamma = 0.1f;
-	float c = 0.1f;
-
-	float qmax = 0;
-	int imax = 0;
-
-	for (int i = 0; i < n_sorties; i += n_controls + 1)
-	{
-		if (sorties[i] > qmax)
-		{
-			qmax = sorties[i];
-			imax = i;
-		}
-	}
-	// exectute({sorties.begin() + imax + 1, sorties.begin() + imax + n_controls + 1});
-
-	float R = 1.f;
-	std::vector<float> xt1(n_controls, 0.f); // from execute
-
 	std::vector<float> sorties1 = compute(xt1);
 	float Q1 = 0.f;
-	for (int i = 0; i < n_sorties; i += n_wires)
+	for (int i = 0; i < m_n_sorties_; i += m_n_wires_)
 	{
 		if (sorties1[i] > Q1)
 		{
@@ -548,32 +563,33 @@ std::vector<float> NetNeurons::Network::wire_fit(std::vector<float> xt)
 		}
 	}
 
-	float delta_Q = alpha * (qmax + R + gamma * Q1);
+	float new_Q = (1 - alpha) * q_values[imax] + alpha * (R + gamma * Q1);
 
-	std::vector<float> distances(n_wires, 0.f);
-	std::vector<float> qs(n_wires, 0.f);
-	for (int i = 0; i < n_sorties; i += n_controls + 1)
+	std::vector<float> distances(m_n_wires_, 0.f);
+
+	for (int i = 0; i < m_n_wires_; ++i)
 	{
-		distances[i] = distance({ sorties.begin() + i + 1, sorties.begin() + i + n_controls + 1 }, { sorties.begin() + imax + 1, sorties.begin() + imax + n_controls + 1 }, sorties[i], qmax, c, epsilon);
-		qs[i] = sorties[i];
+		distances[i] = distance(wires[i], wires[imax], q_values[i], q_values[imax], c, epsilon);
 	}
 
-	float wsum_ = wsum(distances, qs);
+	float wsum_ = wsum(distances, q_values);
 	float norm_ = norm(distances);
 
-	for (size_t i = 0; i < sorties.size(); ++i)
+	std::vector<float> sorties(m_n_sorties_);
+
+	for (size_t i = 0; i < m_n_wires_; ++i)
 	{
 		if (i == imax)
 		{
-			sorties[i] += delta_Q;
+			sorties[i*(m_n_controls_ + 1)] = new_Q;
 		}
-		else if (i % n_wires == 0)
+		else 
 		{
-			sorties[i] += alpha * diffQ(i / n_wires, sorties[i], distances, wsum_, norm_, c);
+			sorties[i * (m_n_controls_ + 1)] = q_values[i] + alpha * diffQ(q_values[i], distances[i], wsum_, norm_, c);
 		}
-		else
+		for (size_t j = 0; j < m_n_controls_; ++j)
 		{
-			sorties[i] += alpha * diffQ(i / n_wires, sorties[i], sorties[imax + i % n_wires + 1], sorties[i - i % n_wires - 1], distances, wsum_, norm_);
+			sorties[i * (m_n_controls_ + 1) + j + 1] += wires[i][j] + alpha * diffQ(wires[i][j], wires[imax][j], q_values[i], distances[i], wsum_, norm_);
 		}
 	}
 
@@ -610,12 +626,12 @@ float norm(const std::vector<float>& distances)
 	return s;
 }
 
-float diffQ(int k, float qk, const std::vector<float>& distances, float wsum_, float norm_, float c)
+float diffQ(float qk, float dist, float wsum_, float norm_, float c)
 {
-	return (norm_ * (distances[k] + c * qk) - wsum_ * c) / (norm_ * norm_ * distances[k] * distances[k]);
+	return (norm_ * (dist + c * qk) - wsum_ * c) / (norm_ * norm_ * dist * dist);
 }
 
-float diffQ(int k, float ukj, float uj, float qk, const std::vector<float>& distances, float wsum_, float norm_)
+float diffQ(float ukj, float uj, float qk, float dist, float wsum_, float norm_)
 {
-	return  2.f * (wsum_ - norm_ * qk) * (ukj - uj) / (norm_ * norm_ * distances[k] * distances[k]);
+	return  2.f * (wsum_ - norm_ * qk) * (ukj - uj) / (norm_ * norm_ * dist * dist);
 }
